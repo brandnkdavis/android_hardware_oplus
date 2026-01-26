@@ -28,5 +28,5 @@ allow hal_oplus_urcc_aidl sysfs_transparent_hugepage:file w_file_perms;
 allow hal_oplus_urcc_aidl vendor_sysfs_cb:file w_file_perms;
 allow hal_oplus_urcc_aidl vendor_sysfs_msm_perf:file rw_file_perms;
 
-# Access to /proc/sys/walt/ nodes
-allow hal_oplus_urcc_aidl proc:file rw_file_perms;
+rw_dir_file(hal_oplus_urcc_aidl, proc_sched)
+rw_dir_file(hal_oplus_urcc_aidl, proc_walt)
