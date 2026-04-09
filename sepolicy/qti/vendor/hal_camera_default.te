@@ -40,7 +40,7 @@ allow hal_camera_default vendor_camera_update_data_file:file create_file_perms;
 allow hal_camera_default vendor_explorer_data_file:dir rw_dir_perms;
 allow hal_camera_default vendor_explorer_data_file:file create_file_perms;
 
-allow hal_camera_default vendor_persist_camera_file:dir w_dir_perms;
+allow hal_camera_default vendor_persist_camera_file:dir rw_dir_perms;
 allow hal_camera_default vendor_persist_camera_file:file create_file_perms;
 allow hal_camera_default vendor_persist_explorer_file:dir w_dir_perms;
 allow hal_camera_default vendor_persist_explorer_file:file create_file_perms;
