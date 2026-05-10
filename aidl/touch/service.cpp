@@ -5,6 +5,7 @@
 
 #define LOG_TAG "vendor.lineage.touch-service.oplus"
 
+#include "GestureInjector.h"
 #include "GloveMode.h"
 #include "HighTouchPollingRate.h"
 #include "TouchscreenGesture.h"
@@ -13,6 +14,7 @@
 #include <android/binder_manager.h>
 #include <android/binder_process.h>
 
+using aidl::vendor::lineage::touch::GestureInjector;
 using aidl::vendor::lineage::touch::GloveMode;
 using aidl::vendor::lineage::touch::HighTouchPollingRate;
 using aidl::vendor::lineage::touch::TouchscreenGesture;
@@ -20,6 +22,8 @@ using aidl::vendor::oplus::hardware::touch::IOplusTouch;
 
 int main() {
     ABinderProcess_setThreadPoolMaxThreadCount(0);
+
+    GestureInjector gestureInjector;
 
     const std::string instance = std::string() + IOplusTouch::descriptor + "/default";
     std::shared_ptr<IOplusTouch> oplusTouch =
