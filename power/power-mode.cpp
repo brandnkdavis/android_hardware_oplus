@@ -10,6 +10,9 @@
 #include <android/binder_manager.h>
 
 #include <OplusTouchConstants.h>
+#include <cerrno>
+#include <climits>
+#include <cstdlib>
 
 using aidl::android::hardware::power::Mode;
 using aidl::vendor::oplus::hardware::touch::IOplusTouch;
@@ -41,9 +44,20 @@ bool setDeviceSpecificMode(Mode type, bool enabled) {
                     ndk::SpAIBinder(AServiceManager_waitForService(instance.c_str())));
             LOG(INFO) << "Power mode: " << toString(type) << " isDoubleTapEnabled: " << enabled;
 
-            oplusTouch->touchReadNodeFile(OplusTouchConstants::DEFAULT_TP_IC_ID,
-                                          OplusTouchConstants::DOUBLE_TAP_INDEP_NODE, &tmp);
-            contents = std::stoi(tmp, nullptr, 16);
+            if (oplusTouch->touchReadNodeFile(OplusTouchConstants::DEFAULT_TP_IC_ID,
+                                              OplusTouchConstants::DOUBLE_TAP_INDEP_NODE, &tmp)
+                        .isOk()) {
+                errno = 0;
+                char* end = nullptr;
+                const long parsed = strtol(tmp.c_str(), &end, 16);
+                if (errno == 0 && end != tmp.c_str() && parsed >= 0 && parsed <= INT_MAX) {
+                    contents = static_cast<int>(parsed);
+                } else {
+                    LOG(WARNING) << "Failed to parse current DT2W bitmask, defaulting to 0";
+                }
+            } else {
+                LOG(WARNING) << "Failed to read current DT2W bitmask, defaulting to 0";
+            }
 
             if (enabled) {
                 contents |= OplusTouchConstants::DOUBLE_TAP_GESTURE;
@@ -56,6 +70,7 @@ bool setDeviceSpecificMode(Mode type, bool enabled) {
             oplusTouch->touchWriteNodeFileOneWay(OplusTouchConstants::DEFAULT_TP_IC_ID,
                                                  OplusTouchConstants::DOUBLE_TAP_INDEP_NODE,
                                                  std::to_string(contents));
+            LOG(INFO) << "Power mode: wrote DT2W bitmask " << contents;
             return true;
         }
         default:
