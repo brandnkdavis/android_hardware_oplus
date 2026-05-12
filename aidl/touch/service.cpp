@@ -15,9 +15,11 @@
 #include <android/binder_process.h>
 #include <OplusTouchConstants.h>
 #include <cerrno>
+#include <chrono>
 #include <climits>
 #include <cstdlib>
 #include <memory>
+#include <thread>
 
 using aidl::vendor::lineage::touch::GestureInjector;
 using aidl::vendor::lineage::touch::GloveMode;
@@ -27,32 +29,62 @@ using aidl::vendor::oplus::hardware::touch::IOplusTouch;
 
 namespace {
 
+bool applyDoubleTapWake(const std::shared_ptr<IOplusTouch>& oplusTouch) {
+    for (int attempt = 0; attempt < 20; ++attempt) {
+        std::string tmp;
+        if (oplusTouch->touchReadNodeFile(OplusTouchConstants::DEFAULT_TP_IC_ID,
+                                          OplusTouchConstants::DOUBLE_TAP_INDEP_NODE, &tmp)
+                    .isOk()) {
+            errno = 0;
+            char* end = nullptr;
+            const long parsed = strtol(tmp.c_str(), &end, 16);
+            if (errno == 0 && end != tmp.c_str() && parsed >= 0 && parsed <= INT_MAX) {
+                const int contents =
+                        static_cast<int>(parsed) | OplusTouchConstants::DOUBLE_TAP_GESTURE;
+                if (oplusTouch->touchWriteNodeFileOneWay(
+                            OplusTouchConstants::DEFAULT_TP_IC_ID,
+                            OplusTouchConstants::DOUBLE_TAP_ENABLE_NODE, "1")
+                            .isOk() &&
+                    oplusTouch->touchWriteNodeFileOneWay(
+                            OplusTouchConstants::DEFAULT_TP_IC_ID,
+                            OplusTouchConstants::DOUBLE_TAP_INDEP_NODE,
+                            std::to_string(contents))
+                            .isOk()) {
+                    LOG(INFO) << "Seeded DT2W bitmask at startup: " << contents;
+                    return true;
+                }
+            } else {
+                LOG(WARNING) << "Failed to parse double-tap bitmask from touch daemon";
+                return false;
+            }
+        }
+
+        LOG(WARNING) << "DT2W seed attempt " << (attempt + 1)
+                     << " failed; retrying after touch service settles";
+        std::this_thread::sleep_for(std::chrono::milliseconds(250));
+    }
+
+    LOG(WARNING) << "Giving up on DT2W startup seed after retries";
+    return false;
+}
+
 void seedDoubleTapWake(const std::shared_ptr<IOplusTouch>& oplusTouch) {
     if (!oplusTouch) {
         return;
     }
 
-    std::string tmp;
-    if (!oplusTouch->touchReadNodeFile(OplusTouchConstants::DEFAULT_TP_IC_ID,
-                                       OplusTouchConstants::DOUBLE_TAP_INDEP_NODE, &tmp)
-                 .isOk()) {
-        return;
+    if (applyDoubleTapWake(oplusTouch)) {
+        std::thread([oplusTouch]() {
+            for (int attempt = 0; attempt < 6; ++attempt) {
+                std::this_thread::sleep_for(std::chrono::seconds(5));
+                if (applyDoubleTapWake(oplusTouch)) {
+                    LOG(INFO) << "Refreshed DT2W bitmask after boot";
+                    return;
+                }
+            }
+            LOG(WARNING) << "DT2W post-boot refresh worker exhausted retries";
+        }).detach();
     }
-
-    errno = 0;
-    char* end = nullptr;
-    const long parsed = strtol(tmp.c_str(), &end, 16);
-    if (errno != 0 || end == tmp.c_str() || parsed < 0 || parsed > INT_MAX) {
-        LOG(WARNING) << "Failed to parse double-tap bitmask from touch daemon";
-        return;
-    }
-
-    const int contents = static_cast<int>(parsed) | OplusTouchConstants::DOUBLE_TAP_GESTURE;
-    oplusTouch->touchWriteNodeFileOneWay(OplusTouchConstants::DEFAULT_TP_IC_ID,
-                                         OplusTouchConstants::DOUBLE_TAP_ENABLE_NODE, "1");
-    oplusTouch->touchWriteNodeFileOneWay(OplusTouchConstants::DEFAULT_TP_IC_ID,
-                                         OplusTouchConstants::DOUBLE_TAP_INDEP_NODE,
-                                         std::to_string(contents));
 }
 
 }  // namespace
