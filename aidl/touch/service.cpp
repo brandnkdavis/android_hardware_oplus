@@ -13,6 +13,10 @@
 #include <android-base/logging.h>
 #include <android/binder_manager.h>
 #include <android/binder_process.h>
+#include <OplusTouchConstants.h>
+#include <cerrno>
+#include <climits>
+#include <cstdlib>
 #include <memory>
 
 using aidl::vendor::lineage::touch::GestureInjector;
@@ -20,6 +24,38 @@ using aidl::vendor::lineage::touch::GloveMode;
 using aidl::vendor::lineage::touch::HighTouchPollingRate;
 using aidl::vendor::lineage::touch::TouchscreenGesture;
 using aidl::vendor::oplus::hardware::touch::IOplusTouch;
+
+namespace {
+
+void seedDoubleTapWake(const std::shared_ptr<IOplusTouch>& oplusTouch) {
+    if (!oplusTouch) {
+        return;
+    }
+
+    std::string tmp;
+    if (!oplusTouch->touchReadNodeFile(OplusTouchConstants::DEFAULT_TP_IC_ID,
+                                       OplusTouchConstants::DOUBLE_TAP_INDEP_NODE, &tmp)
+                 .isOk()) {
+        return;
+    }
+
+    errno = 0;
+    char* end = nullptr;
+    const long parsed = strtol(tmp.c_str(), &end, 16);
+    if (errno != 0 || end == tmp.c_str() || parsed < 0 || parsed > INT_MAX) {
+        LOG(WARNING) << "Failed to parse double-tap bitmask from touch daemon";
+        return;
+    }
+
+    const int contents = static_cast<int>(parsed) | OplusTouchConstants::DOUBLE_TAP_GESTURE;
+    oplusTouch->touchWriteNodeFileOneWay(OplusTouchConstants::DEFAULT_TP_IC_ID,
+                                         OplusTouchConstants::DOUBLE_TAP_ENABLE_NODE, "1");
+    oplusTouch->touchWriteNodeFileOneWay(OplusTouchConstants::DEFAULT_TP_IC_ID,
+                                         OplusTouchConstants::DOUBLE_TAP_INDEP_NODE,
+                                         std::to_string(contents));
+}
+
+}  // namespace
 
 int main() {
     ABinderProcess_setThreadPoolMaxThreadCount(0);
@@ -36,6 +72,9 @@ int main() {
             ENABLE_HTPR ? ndk::SharedRefBase::make<HighTouchPollingRate>(oplusTouch) : nullptr;
     std::shared_ptr<TouchscreenGesture> tg =
             ENABLE_TG ? ndk::SharedRefBase::make<TouchscreenGesture>(oplusTouch) : nullptr;
+
+    seedDoubleTapWake(oplusTouch);
+
     std::unique_ptr<GestureInjector> gestureInjector;
     if (ENABLE_TG) {
         gestureInjector = std::make_unique<GestureInjector>();
