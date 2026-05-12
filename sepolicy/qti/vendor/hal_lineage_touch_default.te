@@ -6,11 +6,11 @@ binder_use(hal_lineage_touch_default)
 rw_dir_file(hal_lineage_touch_default, vendor_proc_display)
 
 # GestureInjector: read hbp_core for gesture type via ioctl
-allow hal_lineage_touch_default oplus_touchdaemon_device:chr_file { open read ioctl };
+allow hal_lineage_touch_default oplus_touchdaemon_device:chr_file { getattr ioctl open read };
 
 # GestureInjector: read touchpanel input event device
-allow hal_lineage_touch_default input_device:chr_file { open read ioctl };
+allow hal_lineage_touch_default input_device:chr_file { getattr ioctl open read };
 allow hal_lineage_touch_default input_device:dir r_dir_perms;
 
 # GestureInjector: create and write uinput virtual device
-allow hal_lineage_touch_default uhid_device:chr_file { open write ioctl };
+allow hal_lineage_touch_default uhid_device:chr_file { getattr ioctl open write };

@@ -25,6 +25,7 @@ class TouchscreenGesture : public BnTouchscreenGesture {
 
   private:
     std::shared_ptr<IOplusTouch> mOplusTouch;
+    int mGestureBitmask = -1;
 
     // See: drivers/input/touchscreen/oplus_touchscreen_v2/touchpanel_common.h
     static constexpr int kGestureStartKey = 246;

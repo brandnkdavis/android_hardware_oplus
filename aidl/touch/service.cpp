@@ -13,6 +13,7 @@
 #include <android-base/logging.h>
 #include <android/binder_manager.h>
 #include <android/binder_process.h>
+#include <memory>
 
 using aidl::vendor::lineage::touch::GestureInjector;
 using aidl::vendor::lineage::touch::GloveMode;
@@ -22,8 +23,6 @@ using aidl::vendor::oplus::hardware::touch::IOplusTouch;
 
 int main() {
     ABinderProcess_setThreadPoolMaxThreadCount(0);
-
-    GestureInjector gestureInjector;
 
     const std::string instance = std::string() + IOplusTouch::descriptor + "/default";
     std::shared_ptr<IOplusTouch> oplusTouch =
@@ -37,6 +36,10 @@ int main() {
             ENABLE_HTPR ? ndk::SharedRefBase::make<HighTouchPollingRate>(oplusTouch) : nullptr;
     std::shared_ptr<TouchscreenGesture> tg =
             ENABLE_TG ? ndk::SharedRefBase::make<TouchscreenGesture>(oplusTouch) : nullptr;
+    std::unique_ptr<GestureInjector> gestureInjector;
+    if (ENABLE_TG) {
+        gestureInjector = std::make_unique<GestureInjector>();
+    }
 
     if (gm) {
         const std::string instance = std::string(GloveMode::descriptor) + "/default";

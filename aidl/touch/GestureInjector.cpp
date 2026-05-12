@@ -15,6 +15,7 @@
 #include <sys/ioctl.h>
 #include <unistd.h>
 
+#include <array>
 #include <cstring>
 #include <string>
 
@@ -30,6 +31,30 @@ constexpr int kGestureKeycodeBase = 246;
 constexpr int kInjectKeycodeMin = 247;
 constexpr int kInjectKeycodeMax = 264;
 constexpr uint32_t kHbpGestureIoctl = 0xD505;
+constexpr size_t kBitsPerLong = sizeof(unsigned long) * 8;
+constexpr size_t kKeyBitmaskSize = (KEY_MAX + kBitsPerLong) / kBitsPerLong;
+
+bool hasKeycode(int fd, int keycode) {
+    std::array<unsigned long, kKeyBitmaskSize> keyBits = {};
+
+    if (ioctl(fd, EVIOCGBIT(EV_KEY, sizeof(keyBits)), keyBits.data()) < 0) {
+        return false;
+    }
+
+    return keyBits[keycode / kBitsPerLong] & (1UL << (keycode % kBitsPerLong));
+}
+
+uint32_t decodeGestureType(const std::array<uint8_t, 64>& gestureData) {
+    uint32_t gestureType = 0;
+    memcpy(&gestureType, gestureData.data(), sizeof(gestureType));
+    if (gestureType != 0) {
+        return gestureType;
+    }
+
+    // Some firmware revisions appear to place the gesture id one word later in the buffer.
+    memcpy(&gestureType, gestureData.data() + sizeof(uint32_t), sizeof(gestureType));
+    return gestureType;
+}
 
 }  // anonymous namespace
 
@@ -91,15 +116,19 @@ std::string GestureInjector::findTouchpanelDevice() {
 
         char name[256] = {};
         int ret = ioctl(fd, EVIOCGNAME(sizeof(name)), name);
-        close(fd);
-        if (ret < 0) continue;
+        if (ret < 0) {
+            close(fd);
+            continue;
+        }
 
-        if (strstr(name, "hbp") || strstr(name, "touchpanel") || strstr(name, "Synaptics") ||
-            strstr(name, "oplus")) {
+        if ((strstr(name, "hbp") || strstr(name, "touchpanel") || strstr(name, "Synaptics")) &&
+            hasKeycode(fd, kKeyF4)) {
             ALOGI("Using touchpanel event device: %s (%s)", devPath.c_str(), name);
             result = devPath;
+            close(fd);
             break;
         }
+        close(fd);
     }
     closedir(dir);
 
@@ -150,11 +179,12 @@ bool GestureInjector::createUinputDevice() {
 }
 
 void GestureInjector::injectKeycode(int keycode) {
-    struct input_event ev[3];
+    struct input_event ev[4];
     memset(ev, 0, sizeof(ev));
     ev[0].type = EV_KEY; ev[0].code = static_cast<__u16>(keycode); ev[0].value = 1;
-    ev[1].type = EV_KEY; ev[1].code = static_cast<__u16>(keycode); ev[1].value = 0;
-    ev[2].type = EV_SYN; ev[2].code = SYN_REPORT; ev[2].value = 0;
+    ev[1].type = EV_SYN; ev[1].code = SYN_REPORT; ev[1].value = 0;
+    ev[2].type = EV_KEY; ev[2].code = static_cast<__u16>(keycode); ev[2].value = 0;
+    ev[3].type = EV_SYN; ev[3].code = SYN_REPORT; ev[3].value = 0;
 
     if (write(mUinputFd, ev, sizeof(ev)) != static_cast<ssize_t>(sizeof(ev))) {
         ALOGE("Failed to inject keycode %d: %s", keycode, strerror(errno));
@@ -176,15 +206,26 @@ void GestureInjector::run() {
         while (read(mEventFd, &ev, sizeof(ev)) == static_cast<ssize_t>(sizeof(ev))) {
             if (ev.type != EV_KEY || ev.code != kKeyF4 || ev.value != 1) continue;
 
-            uint32_t gestureType = 0;
-            if (ioctl(mHbpCoreFd, kHbpGestureIoctl, &gestureType) < 0) {
+            std::array<uint8_t, 64> gestureData = {};
+            if (ioctl(mHbpCoreFd, kHbpGestureIoctl, gestureData.data()) < 0) {
                 ALOGE("ioctl 0xD505 on hbp_core failed: %s", strerror(errno));
                 continue;
             }
 
-            ALOGI("KEY_F4 received, gesture_type=%u", gestureType);
-            if (gestureType > 0) {
-                injectKeycode(kGestureKeycodeBase + gestureType);
+            const uint32_t gestureType = decodeGestureType(gestureData);
+            ALOGI("KEY_F4 received, gesture_type=%u raw=%02x %02x %02x %02x %02x %02x %02x %02x",
+                  gestureType, gestureData[0], gestureData[1], gestureData[2], gestureData[3],
+                  gestureData[4], gestureData[5], gestureData[6], gestureData[7]);
+            if (gestureType <= 1) {
+                ALOGI("Skipping wake-only gesture; touchpanel keylayout handles it");
+                continue;
+            }
+
+            const int keycode = kGestureKeycodeBase + gestureType;
+            if (keycode >= kInjectKeycodeMin && keycode <= kInjectKeycodeMax) {
+                injectKeycode(keycode);
+            } else {
+                ALOGW("Ignoring unsupported gesture_type=%u", gestureType);
             }
         }
     }
